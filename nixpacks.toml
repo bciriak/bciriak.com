@@ -1,8 +1,9 @@
 # Dokploy / Nixpacks build for an Astro static site.
 # Build produces ./dist which Dokploy serves via its static handler.
+# Astro 6 requires Node >=22.12.
 
 [phases.setup]
-nixPkgs = ["nodejs_20", "npm-9_x"]
+nixPkgs = ["nodejs_22"]
 
 [phases.install]
 cmds = ["npm ci"]

@@ -1,0 +1,55 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import {
+  getPublishedPosts,
+  groupPostsByYear,
+  formatShortDate,
+  type Post,
+} from '../../lib/posts';
+
+export async function getStaticPaths() {
+  const posts = await getPublishedPosts();
+  const byTag = new Map<string, Post[]>();
+  for (const post of posts) {
+    for (const tag of post.data.tags) {
+      const list = byTag.get(tag) ?? [];
+      list.push(post);
+      byTag.set(tag, list);
+    }
+  }
+  return [...byTag.entries()].map(([tag, postsForTag]) => ({
+    params: { tag },
+    props: { tag, posts: postsForTag },
+  }));
+}
+
+interface Props {
+  tag: string;
+  posts: Post[];
+}
+
+const { tag, posts } = Astro.props;
+const groups = groupPostsByYear(posts);
+---
+<BaseLayout
+  title={`${tag} — bciriak`}
+  description={`Posts tagged "${tag}" on bciriak.com.`}
+>
+  <p class="intro">
+    Posts tagged <strong>{tag}</strong>.
+  </p>
+
+  {groups.map(({ year, posts }) => (
+    <>
+      <h2 class="year">{year}</h2>
+      <ul class="posts">
+        {posts.map((post) => (
+          <li>
+            <span class="date">{formatShortDate(post.data.pubDate)}</span>
+            <a class="title" href={`/posts/${post.id}/`}>{post.data.title}</a>
+          </li>
+        ))}
+      </ul>
+    </>
+  ))}
+</BaseLayout>

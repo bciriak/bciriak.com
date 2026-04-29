@@ -1,0 +1,32 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { formatShortDate, getPublishedPosts, groupPostsByYear } from '../lib/posts';
+
+const posts = await getPublishedPosts();
+const groups = groupPostsByYear(posts);
+---
+<BaseLayout
+  title="bciriak"
+  description="Software developer writing about experience with lunching products and startups."
+>
+  <h2>
+    Hi<span class="wave" aria-hidden="true"><svg width="1em" height="1em" viewBox="0 0 256 256" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16" focusable="false"><path d="M96.65,62a20,20,0,0,1,34.64-20l30,52"/><path d="M69.32,94.67,55.08,70A20,20,0,0,1,89.73,50l31.17,54"/><path d="M158.87,160A40,40,0,0,1,168,105.58L161.32,94A20,20,0,0,1,196,74l17.31,30A80,80,0,0,1,74.7,184l-40-69.32a20,20,0,0,1,34.64-20L88.57,128"/><path d="M192,33.78A51.84,51.84,0,0,1,223.67,58l.33.57"/><path d="M74.62,232A111.88,111.88,0,0,1,47,200"/></svg></span>, thank you for the visit.
+  </h2>
+  <p class="intro">
+    Software developer with years of experience trying to <strong>jump off the hamster wheel</strong> by creating products that solve real problems, mostly his own, for real people.
+  </p>
+
+  {groups.map(({ year, posts }) => (
+    <>
+      <h2 class="year">{year}</h2>
+      <ul class="posts">
+        {posts.map((post) => (
+          <li>
+            <span class="date">{formatShortDate(post.data.pubDate)}</span>
+            <a class="title" href={`/posts/${post.id}/`}>{post.data.title}</a>
+          </li>
+        ))}
+      </ul>
+    </>
+  ))}
+</BaseLayout>

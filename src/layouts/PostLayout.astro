@@ -1,0 +1,50 @@
+---
+import PostMeta from '../components/PostMeta.astro';
+import type { Post } from '../lib/posts';
+import BaseLayout from './BaseLayout.astro';
+
+interface Props {
+  entry: Post;
+  prev: Post | null;
+  next: Post | null;
+  readingMinutes: number;
+}
+
+const { entry, prev, next, readingMinutes } = Astro.props;
+const { title, description, tags, pubDate } = entry.data;
+---
+<BaseLayout
+  title={`${title} — bciriak`}
+  description={description}
+  canonicalPath={`/posts/${entry.id}/`}
+  bodyClass="post"
+>
+  <a class="post-back" href="/">All writing</a>
+
+  <h1>{title}</h1>
+
+  <PostMeta pubDate={pubDate} readingMinutes={readingMinutes} tags={tags} />
+
+  <slot />
+
+  {(prev || next) && (
+    <>
+      <hr />
+      Ship, ship, ship!
+      <nav class="post-nav">
+        {prev ? (
+          <a class="prev" href={`/posts/${prev.id}/`}>
+            <span class="label">Previous</span>
+            {prev.data.title}
+          </a>
+        ) : <span />}
+        {next ? (
+          <a class="next" href={`/posts/${next.id}/`}>
+            <span class="label">Next</span>
+            {next.data.title}
+          </a>
+        ) : <span />}
+      </nav>
+    </>
+  )}
+</BaseLayout>

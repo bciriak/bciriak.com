@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Why my goroutines were leaking — bciriak</title>
+<link rel="stylesheet" href="styles-v2.css?v=4">
+<template id="__bundler_thumbnail" data-bg-color="#ffffff">
+  <svg viewBox="0 0 1200 800" xmlns="http://www.w3.org/2000/svg">
+    <rect width="1200" height="800" fill="#ffffff"/>
+    <rect x="380" y="240" width="440" height="14" rx="2" fill="#1c1f23"/>
+    <rect x="380" y="270" width="320" height="14" rx="2" fill="#1c1f23"/>
+    <rect x="380" y="320" width="120" height="8" rx="2" fill="#9ca3af"/>
+    <rect x="380" y="380" width="440" height="160" rx="6" fill="#f6f7f9" stroke="#ececef"/>
+    <rect x="400" y="410" width="80" height="6" rx="1" fill="#b34a6f"/>
+    <rect x="400" y="430" width="200" height="6" rx="1" fill="#1c1f23"/>
+    <rect x="400" y="450" width="160" height="6" rx="1" fill="#6b4ec5"/>
+    <rect x="400" y="470" width="240" height="6" rx="1" fill="#1f7a4d"/>
+  </svg>
+</template>
+</head>
+<body>
+<main class="page post" data-screen-label="Post v2">
+
+  <header class="masthead">
+    <div class="site"><a href="Home v2.html">bciriak</a></div>
+    <nav>
+      <a href="Home v2.html">Writing</a>
+      <a href="#">Notes</a>
+      <a href="#">About</a>
+    </nav>
+  </header>
+
+  <a class="post-back" href="Home v2.html">All writing</a>
+
+  <h1>Why my goroutines were leaking</h1>
+
+  <div class="post-meta">
+    <span>March 2, 2026</span>
+    <span>7 min read</span>
+    <span>go, concurrency</span>
+  </div>
+
+  <p>
+    A service we run had been quietly accumulating goroutines for weeks. Memory looked fine. CPU looked fine. But <code>runtime.NumGoroutine()</code> climbed by about forty an hour, every hour, until the process restarted itself out of habit.
+  </p>
+
+  <p>
+    The bug, when I finally found it, was three lines long. Getting there took most of a Saturday.
+  </p>
+
+  <h2>The shape of the leak</h2>
+
+  <p>
+    Every goroutine leak in Go is, ultimately, a goroutine that&rsquo;s blocked on something that will never unblock it &mdash; usually a channel send or receive. The trick is finding which one, and that&rsquo;s what <code>net/http/pprof</code> is for.
+  </p>
+
+  <div class="code-block">
+    <div class="code-head">pprof.go</div>
+<pre><code><span class="tk-kw">import</span> <span class="tk-pun">_</span> <span class="tk-str">"net/http/pprof"</span>
+
+<span class="tk-kw">func</span> <span class="tk-fn">main</span><span class="tk-pun">() {</span>
+    <span class="tk-kw">go</span> <span class="tk-kw">func</span><span class="tk-pun">() {</span>
+        <span class="tk-com">// admin endpoint, not exposed publicly</span>
+        log<span class="tk-pun">.</span><span class="tk-fn">Println</span><span class="tk-pun">(</span>http<span class="tk-pun">.</span><span class="tk-fn">ListenAndServe</span><span class="tk-pun">(</span><span class="tk-str">"localhost:6060"</span><span class="tk-pun">,</span> <span class="tk-kw">nil</span><span class="tk-pun">))</span>
+    <span class="tk-pun">}()</span>
+    <span class="tk-fn">runService</span><span class="tk-pun">()</span>
+<span class="tk-pun">}</span></code></pre>
+  </div>
+
+  <p>
+    With that running, <code>go tool pprof</code> against the goroutine endpoint gives you a snapshot. Wait an hour, take another, diff them. Whatever line numbers are climbing — that's your leak.
+  </p>
+
+  <h2>The actual culprit</h2>
+
+  <p>
+    In our case, every climb pointed at the same function: a worker that fanned out to a downstream API and aggregated responses through a channel. Looked fine on paper.
+  </p>
+
+  <div class="code-block">
+    <div class="code-head">worker.go</div>
+<pre><code><span class="tk-kw">func</span> <span class="tk-fn">fanOut</span><span class="tk-pun">(</span>ctx context<span class="tk-pun">.</span>Context<span class="tk-pun">,</span> ids <span class="tk-pun">[]</span><span class="tk-typ">string</span><span class="tk-pun">) []</span>Result <span class="tk-pun">{</span>
+    out <span class="tk-pun">:=</span> <span class="tk-fn">make</span><span class="tk-pun">(</span><span class="tk-kw">chan</span> Result<span class="tk-pun">)</span>  <span class="tk-com">// unbuffered</span>
+
+    <span class="tk-kw">for</span> _<span class="tk-pun">,</span> id <span class="tk-pun">:=</span> <span class="tk-kw">range</span> ids <span class="tk-pun">{</span>
+        <span class="tk-kw">go</span> <span class="tk-kw">func</span><span class="tk-pun">(</span>id <span class="tk-typ">string</span><span class="tk-pun">) {</span>
+            out <span class="tk-pun">&lt;-</span> <span class="tk-fn">fetch</span><span class="tk-pun">(</span>ctx<span class="tk-pun">,</span> id<span class="tk-pun">)</span>  <span class="tk-com">// blocks if no receiver</span>
+        <span class="tk-pun">}(</span>id<span class="tk-pun">)</span>
+    <span class="tk-pun">}</span>
+
+    <span class="tk-kw">var</span> results <span class="tk-pun">[]</span>Result
+    <span class="tk-kw">for</span> i <span class="tk-pun">:=</span> <span class="tk-num">0</span><span class="tk-pun">;</span> i <span class="tk-pun">&lt;</span> <span class="tk-fn">len</span><span class="tk-pun">(</span>ids<span class="tk-pun">);</span> i<span class="tk-pun">++ {</span>
+        <span class="tk-kw">select</span> <span class="tk-pun">{</span>
+        <span class="tk-kw">case</span> r <span class="tk-pun">:=</span> <span class="tk-pun">&lt;-</span>out<span class="tk-pun">:</span>
+            results <span class="tk-pun">=</span> <span class="tk-fn">append</span><span class="tk-pun">(</span>results<span class="tk-pun">,</span> r<span class="tk-pun">)</span>
+        <span class="tk-kw">case</span> <span class="tk-pun">&lt;-</span>ctx<span class="tk-pun">.</span><span class="tk-fn">Done</span><span class="tk-pun">():</span>
+            <span class="tk-kw">return</span> results  <span class="tk-com">// leaks remaining senders</span>
+        <span class="tk-pun">}</span>
+    <span class="tk-pun">}</span>
+    <span class="tk-kw">return</span> results
+<span class="tk-pun">}</span></code></pre>
+  </div>
+
+  <blockquote>
+    <p>The unbuffered channel means each spawned goroutine blocks on send until someone receives. If the context cancels and we return early, the in-flight goroutines are still trying to send into a channel nobody will ever read from. Forever.</p>
+  </blockquote>
+
+  <h2>The fix</h2>
+
+  <p>
+    Two changes. First, buffer the channel so senders never block. Second — and this is the one I always forget — make every spawned goroutine respect the context too.
+  </p>
+
+  <div class="code-block">
+    <div class="code-head">worker.go (fixed)</div>
+<pre><code>out <span class="tk-pun">:=</span> <span class="tk-fn">make</span><span class="tk-pun">(</span><span class="tk-kw">chan</span> Result<span class="tk-pun">,</span> <span class="tk-fn">len</span><span class="tk-pun">(</span>ids<span class="tk-pun">))</span>  <span class="tk-com">// buffered</span>
+
+<span class="tk-kw">for</span> _<span class="tk-pun">,</span> id <span class="tk-pun">:=</span> <span class="tk-kw">range</span> ids <span class="tk-pun">{</span>
+    <span class="tk-kw">go</span> <span class="tk-kw">func</span><span class="tk-pun">(</span>id <span class="tk-typ">string</span><span class="tk-pun">) {</span>
+        <span class="tk-kw">select</span> <span class="tk-pun">{</span>
+        <span class="tk-kw">case</span> out <span class="tk-pun">&lt;-</span> <span class="tk-fn">fetch</span><span class="tk-pun">(</span>ctx<span class="tk-pun">,</span> id<span class="tk-pun">):</span>
+        <span class="tk-kw">case</span> <span class="tk-pun">&lt;-</span>ctx<span class="tk-pun">.</span><span class="tk-fn">Done</span><span class="tk-pun">():</span>
+        <span class="tk-pun">}</span>
+    <span class="tk-pun">}(</span>id<span class="tk-pun">)</span>
+<span class="tk-pun">}</span></code></pre>
+  </div>
+
+  <p>
+    Now if the parent gives up, the children give up too. Goroutine count stays flat under load. The fan-out pattern is a classic for a reason, but it has a classic footgun to match.
+  </p>
+
+  <h2>Lessons</h2>
+
+  <ul>
+    <li>If a function spawns goroutines, it should also have a story for how each one ends.</li>
+    <li>Unbuffered channels are a synchronization primitive, not just a queue.</li>
+    <li><a href="#">pprof</a> is free. Wire it up before you need it.</li>
+  </ul>
+
+  <hr>
+
+  <nav class="post-nav">
+    <a class="prev" href="Post v2.html">
+      <span class="label">Previous</span>
+      Reading raft, line by line
+    </a>
+    <a class="next" href="Post v2.html">
+      <span class="label">Next</span>
+      A small allocator in 200 lines of Rust
+    </a>
+  </nav>
+
+  <footer class="footer">
+    <span>© 2026 bciriak</span>
+    <span><a href="#">github</a> · <a href="#">twitter</a> · <a href="#">email</a></span>
+  </footer>
+
+</main>
+</body>
+</html>

@@ -1,0 +1,25 @@
+---
+import { formatLongDate } from '../lib/posts';
+
+interface Props {
+  pubDate: Date;
+  readingMinutes: number;
+  tags: string[];
+}
+
+const { pubDate, readingMinutes, tags } = Astro.props;
+---
+<div class="post-meta">
+  <span>{formatLongDate(pubDate)}</span>
+  <span>{readingMinutes} min read</span>
+  {tags.length > 0 && (
+    <span>
+      {tags.map((tag, i) => (
+        <>
+          {i > 0 && ', '}
+          <a href={`/tags/${tag}/`}>{tag}</a>
+        </>
+      ))}
+    </span>
+  )}
+</div>

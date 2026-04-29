@@ -1,0 +1,27 @@
+---
+import BaseHead from '../components/BaseHead.astro';
+import Masthead from '../components/Masthead.astro';
+import Footer from '../components/Footer.astro';
+
+interface Props {
+  title: string;
+  description: string;
+  canonicalPath?: string;
+  bodyClass?: string;
+}
+
+const { title, description, canonicalPath, bodyClass } = Astro.props;
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <BaseHead title={title} description={description} canonicalPath={canonicalPath} />
+  </head>
+  <body>
+    <main class={`page${bodyClass ? ` ${bodyClass}` : ''}`}>
+      <Masthead />
+      <slot />
+      <Footer />
+    </main>
+  </body>
+</html>

@@ -1,0 +1,32 @@
+---
+import { render } from 'astro:content';
+import PostLayout from '../../layouts/PostLayout.astro';
+import { getPublishedPosts, type Post } from '../../lib/posts';
+import { readingTime } from '../../lib/reading-time';
+
+export async function getStaticPaths() {
+  const posts = await getPublishedPosts();
+  // posts is desc by date; for prev/next think chronologically (older = prev, newer = next)
+  return posts.map((entry, i) => {
+    const next = i > 0 ? posts[i - 1] : null;            // newer
+    const prev = i < posts.length - 1 ? posts[i + 1] : null; // older
+    return {
+      params: { slug: entry.id },
+      props: { entry, prev, next },
+    };
+  });
+}
+
+interface Props {
+  entry: Post;
+  prev: Post | null;
+  next: Post | null;
+}
+
+const { entry, prev, next } = Astro.props;
+const { Content } = await render(entry);
+const readingMinutes = readingTime(entry.body ?? '');
+---
+<PostLayout entry={entry} prev={prev} next={next} readingMinutes={readingMinutes}>
+  <Content />
+</PostLayout>
